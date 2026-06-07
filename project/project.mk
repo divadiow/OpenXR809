@@ -108,6 +108,10 @@ ifeq ($(__CONFIG_BIN_COMPRESS), y)
   SUFFIX_XZ := _xz
 endif
 
+ifeq ($(__PRJ_CONFIG_OTA), y)
+  SUFFIX_IMG_XZ := _img_xz
+endif
+
 ifeq ($(__PRJ_CONFIG_RAM_EXT), y)
   SUFFIX_RAME := _ext
 endif
@@ -174,6 +178,13 @@ endif
 # image name, maybe override by the specific project
 IMAGE_NAME ?= xr_system
 
+ifeq ($(__PRJ_CONFIG_OTA), y)
+PROJECT_IMG_XZ_CFG := .image_xz.cfg
+XZ_DEFAULT_IMG := $(IMAGE_NAME).img
+IMAGE_XZ_CFG ?= image$(SUFFIX_IMG_XZ).cfg
+BOOTLOADER_LENGTH := $(shell od -An -N4 -j 32 -i $(IMAGE_PATH)/$(XZ_DEFAULT_IMG) | sed 's/ //g')
+endif
+
 # ----------------------------------------------------------------------------
 # common targets and building rules
 # ----------------------------------------------------------------------------
@@ -196,7 +207,7 @@ ifeq ($(__PRJ_CONFIG_RAM_EXT), y)
 endif
 
 .PHONY: all $(PROJECT).$(ELF_EXT) objdump size clean lib lib_clean \
-	lib_install_clean install image image_clean build build_clean
+	lib_install_clean install image image_xz image_clean build build_clean
 
 all: $(PROJECT).bin size
 
@@ -264,6 +275,17 @@ endif
 	cd $(IMAGE_PATH) && \
 	chmod a+r *.bin && \
 	$(IMAGE_TOOL) $(IMAGE_TOOL_OPT) -c $(IMAGE_CFG) -o $(IMAGE_NAME).img
+
+image_xz:
+ifeq ($(__PRJ_CONFIG_OTA), y)
+	$(Q)cd $(IMAGE_PATH) && cp $(XZ_DEFAULT_IMG) /tmp/$(XZ_DEFAULT_IMG) && \
+	dd if=/tmp/$(XZ_DEFAULT_IMG) of=/tmp/$(XZ_DEFAULT_IMG).temp skip=$(BOOTLOADER_LENGTH) bs=1c && \
+	$(XZ) /tmp/$(XZ_DEFAULT_IMG).temp && \
+	mv /tmp/$(XZ_DEFAULT_IMG).temp.xz image.xz && \
+	rm /tmp/$(XZ_DEFAULT_IMG).temp && rm /tmp/$(XZ_DEFAULT_IMG) && \
+	$(CC) -E -P -CC $(CC_SYMBOLS) -o $(PROJECT_IMG_XZ_CFG) - < $(IMAGE_XZ_CFG) && \
+	$(IMAGE_TOOL) $(IMAGE_TOOL_OPT) -c $(PROJECT_IMG_XZ_CFG) -o $(IMAGE_NAME)$(SUFFIX_IMG_XZ).img
+endif
 
 image_clean:
 	cd $(IMAGE_PATH) && \
