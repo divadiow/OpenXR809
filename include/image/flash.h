@@ -69,6 +69,7 @@ static __inline uint32_t flash_write(uint32_t flash, uint32_t addr,
 
 int32_t flash_get_erase_block(uint32_t flash, uint32_t addr, uint32_t size);
 int flash_erase(uint32_t flash, uint32_t addr, uint32_t size);
+int flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size);
 
 #ifdef __cplusplus
 }

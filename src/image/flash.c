@@ -166,3 +166,148 @@ int flash_erase(uint32_t flash, uint32_t addr, uint32_t size)
 	}
 	return 0;
 }
+
+int flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
+{
+	uint32_t addr_4k_align_start = 0;
+	uint32_t addr_32k_align_start = 0;
+	uint32_t addr_64k_align_start = 0;
+
+	uint32_t addr_4k_align_end = 0;
+	uint32_t addr_32k_align_end = 0;
+	uint32_t addr_64k_align_end = 0;
+
+	uint32_t size_4k_align_ahead = 0;
+	uint32_t size_32k_align_ahead = 0;
+	uint32_t size_4k_align_behind = 0;
+	uint32_t size_32k_align_behind = 0;
+
+	uint32_t size_64k_align = 0;
+
+	HAL_Status status;
+
+	int ret = 0;
+
+	if (HAL_Flash_Open(flash, FLASH_OPEN_TIMEOUT) != HAL_OK) {
+		FLASH_ERR("open %d fail\n", flash);
+		return -1;
+	}
+
+	if (size >= s_flash_erase_param[0].block_size) {
+		if (addr % s_flash_erase_param[0].block_size)
+			addr_64k_align_start = addr + s_flash_erase_param[0].block_size -
+							(addr % s_flash_erase_param[0].block_size);
+		else
+			addr_64k_align_start = addr;
+		HAL_Flash_MemoryOf(flash, s_flash_erase_param[0].erase_mode, addr + size,
+															&addr_64k_align_end);
+		size_64k_align = addr_64k_align_end > addr_64k_align_start ?
+							addr_64k_align_end - addr_64k_align_start : 0;
+	}
+	if (size >= s_flash_erase_param[1].block_size) {
+		if (addr % s_flash_erase_param[1].block_size)
+			addr_32k_align_start = addr + s_flash_erase_param[1].block_size -
+							(addr % s_flash_erase_param[1].block_size);
+		else
+			addr_32k_align_start = addr;
+		HAL_Flash_MemoryOf(flash, s_flash_erase_param[1].erase_mode, addr + size,
+															&addr_32k_align_end);
+		size_32k_align_ahead = addr_64k_align_start > addr_32k_align_start ?
+								addr_64k_align_start - addr_32k_align_start : 0;
+		size_32k_align_behind = addr_32k_align_end > addr_64k_align_end ?
+								addr_32k_align_end - addr_64k_align_end : 0;
+	}
+	if (size >= s_flash_erase_param[2].block_size) {
+		if (addr % s_flash_erase_param[2].block_size)
+			addr_4k_align_start = addr + s_flash_erase_param[2].block_size -
+							(addr % s_flash_erase_param[2].block_size);
+		else
+			addr_4k_align_start = addr;
+		HAL_Flash_MemoryOf(flash, s_flash_erase_param[2].erase_mode, addr + size,
+															&addr_4k_align_end);
+		size_4k_align_ahead = addr_32k_align_start > addr_4k_align_start ?
+								addr_32k_align_start - addr_4k_align_start : 0;
+		size_4k_align_behind = addr_4k_align_end > addr_32k_align_end ?
+								addr_4k_align_end - addr_32k_align_end : 0;
+	}
+
+	FLASH_DBG("start_addr:0x%x(%dK) end_addr:0x%x(%dK) earse_size:0x%x(%dK)\n",
+					addr, addr / 1024,addr + size, (addr + size)/1024, size, size / 1024);
+	FLASH_DBG("addr_4k_align_start:0x%x(%dK) addr_32k_align_start:0x%x(%dK) addr_64k_align_start:0x%x(%dK)\n",
+					addr_4k_align_start, addr_4k_align_start / 1024,
+					addr_32k_align_start, addr_32k_align_start / 1024,
+					addr_64k_align_start, addr_64k_align_start / 1024);
+	FLASH_DBG("addr_4k_align_end:0x%x(%dK) addr_32k_align_end:0x%x(%dK) addr_64k_align_end:0x%x(%dK)\n",
+					addr_4k_align_end, addr_4k_align_end / 1024,
+					addr_32k_align_end, addr_32k_align_end / 1024,
+					addr_64k_align_end, addr_64k_align_end / 1024);
+	FLASH_DBG("size_4k_align_ahead:0x%x(%dK) size_32k_align_ahead:0x%x(%dK)\n",
+					size_4k_align_ahead, size_4k_align_ahead / 1024,
+					size_32k_align_ahead, size_32k_align_ahead /1024);
+	FLASH_DBG("size_4k_align_behind:0x%x(%dK) size_32k_align_behind:0x%x(%dK)\n",
+					size_4k_align_behind, size_4k_align_behind / 1024,
+					size_32k_align_behind, size_32k_align_behind / 1024);
+	FLASH_DBG("size_64k_align:0x%x(%dK)\n", size_64k_align, size_64k_align /1024);
+
+	if (size_4k_align_ahead > 0) {
+		FLASH_DBG("erase the ahead 4k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
+						addr_4k_align_start, addr_4k_align_start / 1024,
+						size_4k_align_ahead, size_4k_align_ahead / 1024);
+		if ((status = HAL_Flash_Erase(flash, s_flash_erase_param[2].erase_mode, addr_4k_align_start,
+						size_4k_align_ahead / s_flash_erase_param[2].block_size)) != HAL_OK) {
+			FLASH_ERR("earse fail\n");
+			ret = -1;
+			goto out;
+		}
+
+	}
+	if (size_4k_align_behind > 0) {
+		FLASH_DBG("erase the behind 4k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
+				addr_32k_align_end, addr_32k_align_end / 1024,
+				size_4k_align_behind, size_4k_align_behind / 1024);
+		if ((status = HAL_Flash_Erase(flash, s_flash_erase_param[2].erase_mode, addr_32k_align_end,
+						size_4k_align_behind / s_flash_erase_param[2].block_size)) != HAL_OK) {
+			FLASH_ERR("earse fail\n");
+			ret = -1;
+			goto out;
+		}
+	}
+	if (size_32k_align_ahead > 0) {
+		FLASH_DBG("erase the ahead 32k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
+				addr_32k_align_start, addr_32k_align_start / 1024,
+				size_32k_align_ahead, size_32k_align_ahead / 1024);
+		if ((status = HAL_Flash_Erase(flash, s_flash_erase_param[1].erase_mode, addr_32k_align_start,
+						size_32k_align_ahead / s_flash_erase_param[1].block_size)) != HAL_OK) {
+			FLASH_ERR("earse fail\n");
+			ret = -1;
+			goto out;
+		}
+	}
+	if (size_32k_align_behind > 0) {
+		FLASH_DBG("erase the ahead 32k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
+				addr_64k_align_end, addr_64k_align_end / 1024,
+				size_32k_align_behind, size_32k_align_behind / 1024);
+		if ((status = HAL_Flash_Erase(flash, s_flash_erase_param[1].erase_mode, addr_64k_align_end,
+						size_32k_align_behind / s_flash_erase_param[1].block_size)) != HAL_OK) {
+			FLASH_ERR("earse fail\n");
+			ret = -1;
+			goto out;
+		}
+	}
+	if (size_64k_align > 0) {
+		FLASH_DBG("erase the middle 64k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
+				addr_64k_align_start, addr_64k_align_start / 1024,
+				size_64k_align, size_64k_align / 1024);
+		if ((status = HAL_Flash_Erase(flash, s_flash_erase_param[0].erase_mode, addr_64k_align_start,
+						size_64k_align / s_flash_erase_param[0].block_size)) != HAL_OK) {
+			FLASH_ERR("earse fail\n");
+			ret = -1;
+			goto out;
+		}
+	}
+
+out:
+	HAL_Flash_Close(flash);
+
+	return ret;
+}
