@@ -29,6 +29,8 @@
 
 #include "driver/chip/hal_flash.h"
 #include "driver/chip/hal_wdg.h"
+#include "sys/interrupt.h"
+#include "compiler.h"
 #include "image/flash.h"
 
 #include "image_debug.h"
@@ -49,7 +51,7 @@ static const flash_erase_param_t s_flash_erase_param[] = {
 #define FLASH_ERASE_PARAM_CNT \
 	(sizeof(s_flash_erase_param) / sizeof(s_flash_erase_param[0]))
 
-static HAL_Status flash_erase_blocks(uint32_t flash, FlashEraseMode erase_mode,
+static HAL_Status __nonxip_text flash_erase_blocks(uint32_t flash, FlashEraseMode erase_mode,
                                       uint32_t addr, uint32_t block_size,
                                       uint32_t block_cnt)
 {
@@ -58,11 +60,22 @@ static HAL_Status flash_erase_blocks(uint32_t flash, FlashEraseMode erase_mode,
 
 	for (i = 0; i < block_cnt; ++i) {
 		uint32_t erase_addr = addr + (i * block_size);
+		unsigned long flags;
 
 		HAL_WDG_Feed();
 		FLASH_DBG("erase block, mode:%#x, addr:0x%x(%dK), block:%u/%u\n",
 		          erase_mode, erase_addr, erase_addr / 1024, i + 1, block_cnt);
+
+		/*
+		 * Flash SBUS erase disables XIP while the operation is in progress.
+		 * Keep IRQs masked around the erase so no interrupt handler or
+		 * scheduler path can fetch code/data from the XIP section while flash
+		 * is unavailable.
+		 */
+		flags = arch_irq_save();
 		status = HAL_Flash_Erase(flash, erase_mode, erase_addr, 1);
+		arch_irq_restore(flags);
+
 		HAL_WDG_Feed();
 		if (status != HAL_OK) {
 			FLASH_ERR("erase fail, mode:%#x, addr:0x%x(%dK), block:%u/%u\n",
@@ -193,7 +206,7 @@ int flash_erase(uint32_t flash, uint32_t addr, uint32_t size)
 	return 0;
 }
 
-int flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
+int __nonxip_text flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 {
 	uint32_t addr_4k_align_start = 0;
 	uint32_t addr_32k_align_start = 0;
