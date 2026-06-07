@@ -28,6 +28,7 @@
  */
 
 #include "driver/chip/hal_flash.h"
+#include "driver/chip/hal_wdg.h"
 #include "image/flash.h"
 
 #include "image_debug.h"
@@ -47,6 +48,31 @@ static const flash_erase_param_t s_flash_erase_param[] = {
 
 #define FLASH_ERASE_PARAM_CNT \
 	(sizeof(s_flash_erase_param) / sizeof(s_flash_erase_param[0]))
+
+static HAL_Status flash_erase_blocks(uint32_t flash, FlashEraseMode erase_mode,
+                                      uint32_t addr, uint32_t block_size,
+                                      uint32_t block_cnt)
+{
+	uint32_t i;
+	HAL_Status status = HAL_OK;
+
+	for (i = 0; i < block_cnt; ++i) {
+		uint32_t erase_addr = addr + (i * block_size);
+
+		HAL_WDG_Feed();
+		FLASH_DBG("erase block, mode:%#x, addr:0x%x(%dK), block:%u/%u\n",
+		          erase_mode, erase_addr, erase_addr / 1024, i + 1, block_cnt);
+		status = HAL_Flash_Erase(flash, erase_mode, erase_addr, 1);
+		HAL_WDG_Feed();
+		if (status != HAL_OK) {
+			FLASH_ERR("erase fail, mode:%#x, addr:0x%x(%dK), block:%u/%u\n",
+			          erase_mode, erase_addr, erase_addr / 1024, i + 1, block_cnt);
+			return status;
+		}
+	}
+
+	return status;
+}
 
 /**
  * @brief Read/write an amount of data from/to flash
@@ -253,7 +279,8 @@ int flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 		FLASH_DBG("erase the ahead 4k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
 						addr_4k_align_start, addr_4k_align_start / 1024,
 						size_4k_align_ahead, size_4k_align_ahead / 1024);
-		if ((status = HAL_Flash_Erase(flash, s_flash_erase_param[2].erase_mode, addr_4k_align_start,
+		if ((status = flash_erase_blocks(flash, s_flash_erase_param[2].erase_mode, addr_4k_align_start,
+						s_flash_erase_param[2].block_size,
 						size_4k_align_ahead / s_flash_erase_param[2].block_size)) != HAL_OK) {
 			FLASH_ERR("earse fail\n");
 			ret = -1;
@@ -265,7 +292,8 @@ int flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 		FLASH_DBG("erase the behind 4k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
 				addr_32k_align_end, addr_32k_align_end / 1024,
 				size_4k_align_behind, size_4k_align_behind / 1024);
-		if ((status = HAL_Flash_Erase(flash, s_flash_erase_param[2].erase_mode, addr_32k_align_end,
+		if ((status = flash_erase_blocks(flash, s_flash_erase_param[2].erase_mode, addr_32k_align_end,
+						s_flash_erase_param[2].block_size,
 						size_4k_align_behind / s_flash_erase_param[2].block_size)) != HAL_OK) {
 			FLASH_ERR("earse fail\n");
 			ret = -1;
@@ -276,7 +304,8 @@ int flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 		FLASH_DBG("erase the ahead 32k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
 				addr_32k_align_start, addr_32k_align_start / 1024,
 				size_32k_align_ahead, size_32k_align_ahead / 1024);
-		if ((status = HAL_Flash_Erase(flash, s_flash_erase_param[1].erase_mode, addr_32k_align_start,
+		if ((status = flash_erase_blocks(flash, s_flash_erase_param[1].erase_mode, addr_32k_align_start,
+						s_flash_erase_param[1].block_size,
 						size_32k_align_ahead / s_flash_erase_param[1].block_size)) != HAL_OK) {
 			FLASH_ERR("earse fail\n");
 			ret = -1;
@@ -287,7 +316,8 @@ int flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 		FLASH_DBG("erase the ahead 32k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
 				addr_64k_align_end, addr_64k_align_end / 1024,
 				size_32k_align_behind, size_32k_align_behind / 1024);
-		if ((status = HAL_Flash_Erase(flash, s_flash_erase_param[1].erase_mode, addr_64k_align_end,
+		if ((status = flash_erase_blocks(flash, s_flash_erase_param[1].erase_mode, addr_64k_align_end,
+						s_flash_erase_param[1].block_size,
 						size_32k_align_behind / s_flash_erase_param[1].block_size)) != HAL_OK) {
 			FLASH_ERR("earse fail\n");
 			ret = -1;
@@ -298,7 +328,8 @@ int flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 		FLASH_DBG("erase the middle 64k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
 				addr_64k_align_start, addr_64k_align_start / 1024,
 				size_64k_align, size_64k_align / 1024);
-		if ((status = HAL_Flash_Erase(flash, s_flash_erase_param[0].erase_mode, addr_64k_align_start,
+		if ((status = flash_erase_blocks(flash, s_flash_erase_param[0].erase_mode, addr_64k_align_start,
+						s_flash_erase_param[0].block_size,
 						size_64k_align / s_flash_erase_param[0].block_size)) != HAL_OK) {
 			FLASH_ERR("earse fail\n");
 			ret = -1;
