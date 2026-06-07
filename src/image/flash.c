@@ -29,7 +29,7 @@
 
 #include "driver/chip/hal_flash.h"
 #include "driver/chip/hal_wdg.h"
-#include "sys/interrupt.h"
+#include "kernel/os/os_mutex.h"
 #include "compiler.h"
 #include "image/flash.h"
 
@@ -51,6 +51,34 @@ static const flash_erase_param_t s_flash_erase_param[] = {
 #define FLASH_ERASE_PARAM_CNT \
 	(sizeof(s_flash_erase_param) / sizeof(s_flash_erase_param[0]))
 
+static OS_Mutex_t s_flash_mutex;
+static int s_flash_mutex_created;
+
+static int flash_mutex_lock(void)
+{
+	if (!s_flash_mutex_created) {
+		if (OS_MutexCreate(&s_flash_mutex) != OS_OK) {
+			FLASH_ERR("flash mutex create failed\n");
+			return -1;
+		}
+		s_flash_mutex_created = 1;
+	}
+
+	if (OS_MutexLock(&s_flash_mutex, OS_WAIT_FOREVER) != OS_OK) {
+		FLASH_ERR("flash mutex lock failed\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+static void flash_mutex_unlock(void)
+{
+	if (s_flash_mutex_created) {
+		OS_MutexUnlock(&s_flash_mutex);
+	}
+}
+
 static HAL_Status __nonxip_text flash_erase_blocks(uint32_t flash, FlashEraseMode erase_mode,
                                       uint32_t addr, uint32_t block_size,
                                       uint32_t block_cnt)
@@ -60,21 +88,12 @@ static HAL_Status __nonxip_text flash_erase_blocks(uint32_t flash, FlashEraseMod
 
 	for (i = 0; i < block_cnt; ++i) {
 		uint32_t erase_addr = addr + (i * block_size);
-		unsigned long flags;
 
 		HAL_WDG_Feed();
 		FLASH_DBG("erase block, mode:%#x, addr:0x%x(%dK), block:%u/%u\n",
 		          erase_mode, erase_addr, erase_addr / 1024, i + 1, block_cnt);
 
-		/*
-		 * Flash SBUS erase disables XIP while the operation is in progress.
-		 * Keep IRQs masked around the erase so no interrupt handler or
-		 * scheduler path can fetch code/data from the XIP section while flash
-		 * is unavailable.
-		 */
-		flags = arch_irq_save();
 		status = HAL_Flash_Erase(flash, erase_mode, erase_addr, 1);
-		arch_irq_restore(flags);
 
 		HAL_WDG_Feed();
 		if (status != HAL_OK) {
@@ -101,9 +120,14 @@ uint32_t flash_rw(uint32_t flash, uint32_t addr,
 {
 	HAL_Status status;
 
+	if (flash_mutex_lock() != 0) {
+		return 0;
+	}
+
 	status = HAL_Flash_Open(flash, FLASH_OPEN_TIMEOUT);
 	if (status != HAL_OK) {
 		FLASH_ERR("open %u fail\n", flash);
+		flash_mutex_unlock();
 		return 0;
 	}
 
@@ -114,6 +138,7 @@ uint32_t flash_rw(uint32_t flash, uint32_t addr,
 	}
 
 	HAL_Flash_Close(flash);
+	flash_mutex_unlock();
 	if (status != HAL_OK) {
 		FLASH_ERR("%s fail, (%u, %#x, %u), %p\n", do_write ? "write" : "read",
 				  flash, addr, size, buf);
@@ -171,8 +196,13 @@ int flash_erase(uint32_t flash, uint32_t addr, uint32_t size)
 
 	FLASH_DBG("flash_erase called for %i size %i\n", addr, size);
 
+	if (flash_mutex_lock() != 0) {
+		return -1;
+	}
+
 	if (HAL_Flash_Open(flash, FLASH_OPEN_TIMEOUT) != HAL_OK) {
 		FLASH_ERR("open %d fail\n", flash);
+		flash_mutex_unlock();
 		return -1;
 	}
 
@@ -198,6 +228,7 @@ int flash_erase(uint32_t flash, uint32_t addr, uint32_t size)
 	}
 
 	HAL_Flash_Close(flash);
+	flash_mutex_unlock();
 
 	if (i >= FLASH_ERASE_PARAM_CNT) {
 		FLASH_ERR("fail, (%u, %#x, %u)\n", flash, addr, size);
@@ -227,8 +258,13 @@ int __nonxip_text flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 
 	int ret = 0;
 
+	if (flash_mutex_lock() != 0) {
+		return -1;
+	}
+
 	if (HAL_Flash_Open(flash, FLASH_OPEN_TIMEOUT) != HAL_OK) {
 		FLASH_ERR("open %d fail\n", flash);
+		flash_mutex_unlock();
 		return -1;
 	}
 
@@ -352,6 +388,7 @@ int __nonxip_text flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 
 out:
 	HAL_Flash_Close(flash);
+	flash_mutex_unlock();
 
 	return ret;
 }
