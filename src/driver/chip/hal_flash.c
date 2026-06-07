@@ -1026,8 +1026,18 @@ HAL_Status HAL_Flash_Erase(uint32_t flash, FlashEraseMode blk_size, uint32_t add
 
 	while (blk_cnt-- > 0)
 	{
+		unsigned long flags;
+
 		dev->drv->open(dev->drv);
 
+		/*
+		 * Keep interrupts enabled while opening the flash controller so the
+		 * XIP/SBUS driver can suspend the scheduler safely. Once XIP is
+		 * disabled and the erase transaction is active, mask interrupts until
+		 * the flash chip is no longer busy. This avoids ISR paths fetching
+		 * XIP code/rodata while the external flash is unavailable.
+		 */
+		flags = HAL_EnterCriticalSection();
 		dev->chip->writeEnable(dev->chip);
 		ret = dev->chip->erase(dev->chip, blk_size, eaddr);
 		dev->chip->writeDisable(dev->chip);
@@ -1036,6 +1046,7 @@ HAL_Status HAL_Flash_Erase(uint32_t flash, FlashEraseMode blk_size, uint32_t add
 			FD_ERROR("erase failed: %d", ret);
 
 		ret = HAL_Flash_WaitCompl(dev, 5000);
+		HAL_ExitCriticalSection(flags);
 
 		dev->drv->close(dev->drv);
 
