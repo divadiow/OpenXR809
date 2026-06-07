@@ -29,6 +29,7 @@
 
 #include "driver/chip/hal_flash.h"
 #include "driver/chip/hal_wdg.h"
+#include "driver/chip/hal_nvic.h"
 #include "kernel/os/os_mutex.h"
 #include "compiler.h"
 #include "image/flash.h"
@@ -93,7 +94,15 @@ static HAL_Status __nonxip_text flash_erase_blocks(uint32_t flash, FlashEraseMod
 		FLASH_DBG("erase block, mode:%#x, addr:0x%x(%dK), block:%u/%u\n",
 		          erase_mode, erase_addr, erase_addr / 1024, i + 1, block_cnt);
 
+		/*
+		 * During SBUS flash erase the network-core mailbox IRQ can fire while
+		 * the flash controller has XIP disabled. Mask only that IRQ, rather
+		 * than globally masking interrupts, so the flash driver delay/wait path
+		 * can still operate normally.
+		 */
+		HAL_NVIC_DisableIRQ(MBOX_N_IRQn);
 		status = HAL_Flash_Erase(flash, erase_mode, erase_addr, 1);
+		HAL_NVIC_EnableIRQ(MBOX_N_IRQn);
 
 		HAL_WDG_Feed();
 		if (status != HAL_OK) {
