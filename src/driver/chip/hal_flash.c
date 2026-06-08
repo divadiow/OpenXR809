@@ -39,8 +39,6 @@
 #include "driver/chip/hal_spi.h"
 #include "driver/chip/hal_flashctrl.h"
 #include "driver/chip/hal_flash.h"
-#include "sys/interrupt.h"
-#include "driver/chip/hal_wdg.h"
 #include "driver/chip/hal_wdg.h" /* for HAL_Alive() */
 #include "hal_base.h"
 
@@ -767,25 +765,9 @@ static HAL_Status HAL_Flash_WaitCompl(FlashDev *dev, int32_t timeout_ms)
 {
 #define FLASH_WAIT_TIME (1)
 	uint32_t loop = 0;
-	uint32_t total_loop = 0;
-	int busy;
 
-	FD_INFO("wait trace enter, timeout %d ms", timeout_ms);
-	while (1)
+	while (dev->chip->isBusy(dev->chip) > 0)
 	{
-		if (total_loop < 20 || ((total_loop % 100) == 0))
-			FD_INFO("wait trace before isBusy, loop %u, remaining %d",
-			        total_loop, timeout_ms);
-
-		busy = dev->chip->isBusy(dev->chip);
-
-		if (total_loop < 20 || ((total_loop % 100) == 0))
-			FD_INFO("wait trace after isBusy, loop %u, busy %d",
-			        total_loop, busy);
-
-		if (busy <= 0)
-			break;
-
 		dev->drv->msleep(dev->drv, FLASH_WAIT_TIME);
 		timeout_ms -= FLASH_WAIT_TIME;
 		if (timeout_ms <= 0) {
@@ -796,46 +778,9 @@ static HAL_Status HAL_Flash_WaitCompl(FlashDev *dev, int32_t timeout_ms)
 			HAL_Alive();
 			loop = 0;
 		}
-		++total_loop;
 	}
-	FD_INFO("wait trace exit, busy %d, loops %u, remaining %d",
-	        busy, total_loop, timeout_ms);
 	return HAL_OK;
 #undef FLASH_WAIT_TIME
-}
-
-static HAL_Status HAL_Flash_WaitComplCritical(FlashDev *dev, int32_t timeout_ms,
-                                               uint32_t *loop_out, int *busy_out)
-{
-#define FLASH_CRITICAL_WAIT_US (1000)
-	uint32_t loops = 0;
-	uint32_t max_loops = (timeout_ms > 0) ? (uint32_t)timeout_ms : 1;
-	int busy = 1;
-
-	while (loops < max_loops) {
-		busy = dev->chip->isBusy(dev->chip);
-		if (busy <= 0)
-			break;
-
-		if ((loops & 0x7f) == 0)
-			HAL_WDG_Feed();
-
-		HAL_XIP_Delay(FLASH_CRITICAL_WAIT_US);
-		++loops;
-	}
-
-	if (loop_out)
-		*loop_out = loops;
-	if (busy_out)
-		*busy_out = busy;
-
-	if (busy > 0) {
-		FD_ERROR("critical wait clr busy timeout, loops %u, busy %d", loops, busy);
-		return HAL_TIMEOUT;
-	}
-
-	return HAL_OK;
-#undef FLASH_CRITICAL_WAIT_US
 }
 
 /**
@@ -1065,12 +1010,8 @@ HAL_Status HAL_Flash_Erase(uint32_t flash, FlashEraseMode blk_size, uint32_t add
 	HAL_Status ret = HAL_ERROR;
 	uint32_t esize = blk_size;
 	uint32_t eaddr = addr;
-	uint32_t orig_blk_cnt = blk_cnt;
-	uint32_t block_index = 0;
 
 	FD_DEBUG("%d: e%d * %d, a: 0x%x", flash, (uint32_t)blk_size, blk_cnt, addr);
-	FD_INFO("erase trace enter, flash %u, mode %#x, addr %#x, blocks %u",
-	        flash, (uint32_t)blk_size, addr, blk_cnt);
 
 	if ((addr + blk_size * blk_cnt) > dev->chip->mSize) {
 		FD_ERROR("erase memory is over flash memory\n");
@@ -1085,49 +1026,24 @@ HAL_Status HAL_Flash_Erase(uint32_t flash, FlashEraseMode blk_size, uint32_t add
 
 	while (blk_cnt-- > 0)
 	{
-		unsigned long irq_flags;
-		uint32_t wait_loops = 0;
-		int wait_busy = -1;
+		dev->drv->open(dev->drv);
 
-		++block_index;
-		FD_INFO("erase trace block %u/%u before drv open, addr %#x",
-		        block_index, orig_blk_cnt, eaddr);
-
-		ret = dev->drv->open(dev->drv);
-		FD_INFO("erase trace block %u/%u after drv open, ret %d",
-		        block_index, orig_blk_cnt, ret);
-		if (ret != HAL_OK)
-			break;
-
-		/*
-		 * XR809 diagnostic path: once the erase command is accepted the external
-		 * flash is busy and XIP/interrupt paths are unsafe.  Do the command and
-		 * busy polling in one short, non-sleeping critical section.  Do not log or
-		 * call the scheduler while the chip is busy.
-		 */
-		FD_INFO("erase trace block %u/%u before critical erase+poll", block_index, orig_blk_cnt);
-		irq_flags = arch_irq_save();
 		dev->chip->writeEnable(dev->chip);
 		ret = dev->chip->erase(dev->chip, blk_size, eaddr);
-		if (ret >= 0)
-			ret = HAL_Flash_WaitComplCritical(dev, 5000, &wait_loops, &wait_busy);
 		dev->chip->writeDisable(dev->chip);
-		arch_irq_restore(irq_flags);
-		FD_INFO("erase trace block %u/%u after critical erase+poll, ret %d, loops %u, busy %d",
-		        block_index, orig_blk_cnt, ret, wait_loops, wait_busy);
 
-		FD_INFO("erase trace block %u/%u before drv close", block_index, orig_blk_cnt);
-		dev->drv->close(dev->drv);
-		FD_INFO("erase trace block %u/%u after drv close", block_index, orig_blk_cnt);
-
-		if (ret < 0) {
+		if (ret < 0)
 			FD_ERROR("erase failed: %d", ret);
+
+		ret = HAL_Flash_WaitCompl(dev, 5000);
+
+		dev->drv->close(dev->drv);
+
+		if (ret < 0)
 			break;
-		}
 		eaddr += esize;
 	}
 
-	FD_INFO("erase trace exit, ret %d", ret);
 	return ret;
 }
 

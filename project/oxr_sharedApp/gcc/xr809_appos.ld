@@ -69,7 +69,7 @@ SECTIONS
 		*libconsole.a: (.text .text.* .rodata .rodata.*)
 		*libutil.a: (.text .text.* .rodata .rodata.*)
 
-		/* Keep hal_mbox.o in RAM: MBOX IRQ can fire while flash/XIP is suspended during OTA erase. */
+		*libchip.a:hal_mbox.o (.text .text.* .rodata .rodata.*)
 		*libchip.a:hal_wdg.o (.text .text.* .rodata .rodata.*)
 		*libchip.a:hal_timer.o (.text .text.* .rodata .rodata.*)
 		*libchip.a:hal_rtc.o (.text .text.* .rodata .rodata.*)
