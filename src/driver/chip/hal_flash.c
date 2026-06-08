@@ -1010,8 +1010,12 @@ HAL_Status HAL_Flash_Erase(uint32_t flash, FlashEraseMode blk_size, uint32_t add
 	HAL_Status ret = HAL_ERROR;
 	uint32_t esize = blk_size;
 	uint32_t eaddr = addr;
+	uint32_t orig_blk_cnt = blk_cnt;
+	uint32_t block_index = 0;
 
 	FD_DEBUG("%d: e%d * %d, a: 0x%x", flash, (uint32_t)blk_size, blk_cnt, addr);
+	FD_INFO("erase trace enter, flash %u, mode %#x, addr %#x, blocks %u",
+	        flash, (uint32_t)blk_size, addr, blk_cnt);
 
 	if ((addr + blk_size * blk_cnt) > dev->chip->mSize) {
 		FD_ERROR("erase memory is over flash memory\n");
@@ -1026,24 +1030,46 @@ HAL_Status HAL_Flash_Erase(uint32_t flash, FlashEraseMode blk_size, uint32_t add
 
 	while (blk_cnt-- > 0)
 	{
-		dev->drv->open(dev->drv);
+		++block_index;
+		FD_INFO("erase trace block %u/%u before drv open, addr %#x",
+		        block_index, orig_blk_cnt, eaddr);
+		ret = dev->drv->open(dev->drv);
+		FD_INFO("erase trace block %u/%u after drv open, ret %d",
+		        block_index, orig_blk_cnt, ret);
+		if (ret != HAL_OK)
+			break;
 
+		FD_INFO("erase trace block %u/%u before writeEnable", block_index, orig_blk_cnt);
 		dev->chip->writeEnable(dev->chip);
+		FD_INFO("erase trace block %u/%u after writeEnable", block_index, orig_blk_cnt);
+
+		FD_INFO("erase trace block %u/%u before erase cmd", block_index, orig_blk_cnt);
 		ret = dev->chip->erase(dev->chip, blk_size, eaddr);
+		FD_INFO("erase trace block %u/%u after erase cmd, ret %d",
+		        block_index, orig_blk_cnt, ret);
+
+		FD_INFO("erase trace block %u/%u before writeDisable", block_index, orig_blk_cnt);
 		dev->chip->writeDisable(dev->chip);
+		FD_INFO("erase trace block %u/%u after writeDisable", block_index, orig_blk_cnt);
 
 		if (ret < 0)
 			FD_ERROR("erase failed: %d", ret);
 
+		FD_INFO("erase trace block %u/%u before wait complete", block_index, orig_blk_cnt);
 		ret = HAL_Flash_WaitCompl(dev, 5000);
+		FD_INFO("erase trace block %u/%u after wait complete, ret %d",
+		        block_index, orig_blk_cnt, ret);
 
+		FD_INFO("erase trace block %u/%u before drv close", block_index, orig_blk_cnt);
 		dev->drv->close(dev->drv);
+		FD_INFO("erase trace block %u/%u after drv close", block_index, orig_blk_cnt);
 
 		if (ret < 0)
 			break;
 		eaddr += esize;
 	}
 
+	FD_INFO("erase trace exit, ret %d", ret);
 	return ret;
 }
 
