@@ -765,9 +765,25 @@ static HAL_Status HAL_Flash_WaitCompl(FlashDev *dev, int32_t timeout_ms)
 {
 #define FLASH_WAIT_TIME (1)
 	uint32_t loop = 0;
+	uint32_t total_loop = 0;
+	int busy;
 
-	while (dev->chip->isBusy(dev->chip) > 0)
+	FD_INFO("wait trace enter, timeout %d ms", timeout_ms);
+	while (1)
 	{
+		if (total_loop < 20 || ((total_loop % 100) == 0))
+			FD_INFO("wait trace before isBusy, loop %u, remaining %d",
+			        total_loop, timeout_ms);
+
+		busy = dev->chip->isBusy(dev->chip);
+
+		if (total_loop < 20 || ((total_loop % 100) == 0))
+			FD_INFO("wait trace after isBusy, loop %u, busy %d",
+			        total_loop, busy);
+
+		if (busy <= 0)
+			break;
+
 		dev->drv->msleep(dev->drv, FLASH_WAIT_TIME);
 		timeout_ms -= FLASH_WAIT_TIME;
 		if (timeout_ms <= 0) {
@@ -778,7 +794,10 @@ static HAL_Status HAL_Flash_WaitCompl(FlashDev *dev, int32_t timeout_ms)
 			HAL_Alive();
 			loop = 0;
 		}
+		++total_loop;
 	}
+	FD_INFO("wait trace exit, busy %d, loops %u, remaining %d",
+	        busy, total_loop, timeout_ms);
 	return HAL_OK;
 #undef FLASH_WAIT_TIME
 }
