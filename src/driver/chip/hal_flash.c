@@ -345,7 +345,7 @@ static HAL_Status flashcFlashWrite(FlashDrvierBase *base, InstructionField *cmd,
 	if (tmp[INS_DATA].len >= (base->sizeToDma - 1) &&  tmp[INS_DATA].len < 128 * 1024)
 		dma = 1;
 
-	return HAL_Flashc_Transfer(1, &tmp[INS_CMD], &tmp[INS_ADDR], &tmp[INS_DUM], &tmp[INS_DATA], dma);
+	return HAL_Flashc_Write(&tmp[INS_CMD], &tmp[INS_ADDR], &tmp[INS_DUM], &tmp[INS_DATA], dma);
 }
 
 /**
@@ -372,7 +372,7 @@ static HAL_Status flashcFlashRead(FlashDrvierBase *base, InstructionField *cmd, 
 	if (tmp[INS_DATA].len >= (base->sizeToDma - 1) &&  tmp[INS_DATA].len < 128 * 1024)
 		dma = 1;
 
-	return HAL_Flashc_Transfer(0, &tmp[INS_CMD], &tmp[INS_ADDR], &tmp[INS_DUM], &tmp[INS_DATA], dma);
+	return HAL_Flashc_Read(&tmp[INS_CMD], &tmp[INS_ADDR], &tmp[INS_DUM], &tmp[INS_DATA], dma);
 }
 
 /**
