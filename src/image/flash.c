@@ -29,7 +29,6 @@
 
 #include "driver/chip/hal_flash.h"
 #include "driver/chip/hal_wdg.h"
-#include "driver/chip/hal_nvic.h"
 #include "kernel/os/os_mutex.h"
 #include "compiler.h"
 #include "image/flash.h"
@@ -94,15 +93,7 @@ static HAL_Status __nonxip_text flash_erase_blocks(uint32_t flash, FlashEraseMod
 		FLASH_DBG("erase block, mode:%#x, addr:0x%x(%dK), block:%u/%u\n",
 		          erase_mode, erase_addr, erase_addr / 1024, i + 1, block_cnt);
 
-		/*
-		 * During SBUS flash erase the network-core mailbox IRQ can fire while
-		 * the flash controller has XIP disabled. Mask only that IRQ, rather
-		 * than globally masking interrupts, so the flash driver delay/wait path
-		 * can still operate normally.
-		 */
-		HAL_NVIC_DisableIRQ(MBOX_N_IRQn);
 		status = HAL_Flash_Erase(flash, erase_mode, erase_addr, 1);
-		HAL_NVIC_EnableIRQ(MBOX_N_IRQn);
 
 		HAL_WDG_Feed();
 		if (status != HAL_OK) {
@@ -248,24 +239,25 @@ int flash_erase(uint32_t flash, uint32_t addr, uint32_t size)
 
 int __nonxip_text flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 {
-	uint32_t addr_4k_align_start = 0;
-	uint32_t addr_32k_align_start = 0;
-	uint32_t addr_64k_align_start = 0;
-
-	uint32_t addr_4k_align_end = 0;
-	uint32_t addr_32k_align_end = 0;
-	uint32_t addr_64k_align_end = 0;
-
-	uint32_t size_4k_align_ahead = 0;
-	uint32_t size_32k_align_ahead = 0;
-	uint32_t size_4k_align_behind = 0;
-	uint32_t size_32k_align_behind = 0;
-
-	uint32_t size_64k_align = 0;
-
+	uint32_t end = addr + size;
+	uint32_t cur = addr;
 	HAL_Status status;
-
 	int ret = 0;
+
+	if (size == 0) {
+		return 0;
+	}
+
+	if (end < addr) {
+		FLASH_ERR("invalid erase range, addr:0x%x, size:0x%x\n", addr, size);
+		return -1;
+	}
+
+	if ((addr & (s_flash_erase_param[2].block_size - 1)) ||
+		(size & (s_flash_erase_param[2].block_size - 1))) {
+		FLASH_ERR("erase range is not 4k aligned, addr:0x%x, size:0x%x\n", addr, size);
+		return -1;
+	}
 
 	if (flash_mutex_lock() != 0) {
 		return -1;
@@ -277,122 +269,39 @@ int __nonxip_text flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 		return -1;
 	}
 
-	if (size >= s_flash_erase_param[0].block_size) {
-		if (addr % s_flash_erase_param[0].block_size)
-			addr_64k_align_start = addr + s_flash_erase_param[0].block_size -
-							(addr % s_flash_erase_param[0].block_size);
-		else
-			addr_64k_align_start = addr;
-		HAL_Flash_MemoryOf(flash, s_flash_erase_param[0].erase_mode, addr + size,
-															&addr_64k_align_end);
-		size_64k_align = addr_64k_align_end > addr_64k_align_start ?
-							addr_64k_align_end - addr_64k_align_start : 0;
-	}
-	if (size >= s_flash_erase_param[1].block_size) {
-		if (addr % s_flash_erase_param[1].block_size)
-			addr_32k_align_start = addr + s_flash_erase_param[1].block_size -
-							(addr % s_flash_erase_param[1].block_size);
-		else
-			addr_32k_align_start = addr;
-		HAL_Flash_MemoryOf(flash, s_flash_erase_param[1].erase_mode, addr + size,
-															&addr_32k_align_end);
-		size_32k_align_ahead = addr_64k_align_start > addr_32k_align_start ?
-								addr_64k_align_start - addr_32k_align_start : 0;
-		size_32k_align_behind = addr_32k_align_end > addr_64k_align_end ?
-								addr_32k_align_end - addr_64k_align_end : 0;
-	}
-	if (size >= s_flash_erase_param[2].block_size) {
-		if (addr % s_flash_erase_param[2].block_size)
-			addr_4k_align_start = addr + s_flash_erase_param[2].block_size -
-							(addr % s_flash_erase_param[2].block_size);
-		else
-			addr_4k_align_start = addr;
-		HAL_Flash_MemoryOf(flash, s_flash_erase_param[2].erase_mode, addr + size,
-															&addr_4k_align_end);
-		size_4k_align_ahead = addr_32k_align_start > addr_4k_align_start ?
-								addr_32k_align_start - addr_4k_align_start : 0;
-		size_4k_align_behind = addr_4k_align_end > addr_32k_align_end ?
-								addr_4k_align_end - addr_32k_align_end : 0;
-	}
-
 	FLASH_DBG("start_addr:0x%x(%dK) end_addr:0x%x(%dK) earse_size:0x%x(%dK)\n",
-					addr, addr / 1024,addr + size, (addr + size)/1024, size, size / 1024);
-	FLASH_DBG("addr_4k_align_start:0x%x(%dK) addr_32k_align_start:0x%x(%dK) addr_64k_align_start:0x%x(%dK)\n",
-					addr_4k_align_start, addr_4k_align_start / 1024,
-					addr_32k_align_start, addr_32k_align_start / 1024,
-					addr_64k_align_start, addr_64k_align_start / 1024);
-	FLASH_DBG("addr_4k_align_end:0x%x(%dK) addr_32k_align_end:0x%x(%dK) addr_64k_align_end:0x%x(%dK)\n",
-					addr_4k_align_end, addr_4k_align_end / 1024,
-					addr_32k_align_end, addr_32k_align_end / 1024,
-					addr_64k_align_end, addr_64k_align_end / 1024);
-	FLASH_DBG("size_4k_align_ahead:0x%x(%dK) size_32k_align_ahead:0x%x(%dK)\n",
-					size_4k_align_ahead, size_4k_align_ahead / 1024,
-					size_32k_align_ahead, size_32k_align_ahead /1024);
-	FLASH_DBG("size_4k_align_behind:0x%x(%dK) size_32k_align_behind:0x%x(%dK)\n",
-					size_4k_align_behind, size_4k_align_behind / 1024,
-					size_32k_align_behind, size_32k_align_behind / 1024);
-	FLASH_DBG("size_64k_align:0x%x(%dK)\n", size_64k_align, size_64k_align /1024);
+				addr, addr / 1024, end, end / 1024, size, size / 1024);
 
-	if (size_4k_align_ahead > 0) {
-		FLASH_DBG("erase the ahead 4k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
-						addr_4k_align_start, addr_4k_align_start / 1024,
-						size_4k_align_ahead, size_4k_align_ahead / 1024);
-		if ((status = flash_erase_blocks(flash, s_flash_erase_param[2].erase_mode, addr_4k_align_start,
-						s_flash_erase_param[2].block_size,
-						size_4k_align_ahead / s_flash_erase_param[2].block_size)) != HAL_OK) {
-			FLASH_ERR("earse fail\n");
-			ret = -1;
-			goto out;
+	while (cur < end) {
+		uint32_t remaining = end - cur;
+		uint32_t block_size = s_flash_erase_param[2].block_size;
+		FlashEraseMode erase_mode = s_flash_erase_param[2].erase_mode;
+		uint32_t start;
+
+		if ((remaining >= (uint32_t)s_flash_erase_param[0].block_size) &&
+			(HAL_Flash_MemoryOf(flash, s_flash_erase_param[0].erase_mode, cur, &start) == HAL_OK) &&
+			(cur == start)) {
+			block_size = s_flash_erase_param[0].block_size;
+			erase_mode = s_flash_erase_param[0].erase_mode;
+		} else if ((remaining >= (uint32_t)s_flash_erase_param[1].block_size) &&
+			(HAL_Flash_MemoryOf(flash, s_flash_erase_param[1].erase_mode, cur, &start) == HAL_OK) &&
+			(cur == start)) {
+			block_size = s_flash_erase_param[1].block_size;
+			erase_mode = s_flash_erase_param[1].erase_mode;
 		}
 
-	}
-	if (size_4k_align_behind > 0) {
-		FLASH_DBG("erase the behind 4k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
-				addr_32k_align_end, addr_32k_align_end / 1024,
-				size_4k_align_behind, size_4k_align_behind / 1024);
-		if ((status = flash_erase_blocks(flash, s_flash_erase_param[2].erase_mode, addr_32k_align_end,
-						s_flash_erase_param[2].block_size,
-						size_4k_align_behind / s_flash_erase_param[2].block_size)) != HAL_OK) {
+		FLASH_DBG("erase area, mode:%#x, addr:0x%x(%dK), size:0x%x(%dK), remaining:0x%x(%dK)\n",
+				  erase_mode, cur, cur / 1024, block_size, block_size / 1024,
+				  remaining, remaining / 1024);
+
+		status = flash_erase_blocks(flash, erase_mode, cur, block_size, 1);
+		if (status != HAL_OK) {
 			FLASH_ERR("earse fail\n");
 			ret = -1;
 			goto out;
 		}
-	}
-	if (size_32k_align_ahead > 0) {
-		FLASH_DBG("erase the ahead 32k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
-				addr_32k_align_start, addr_32k_align_start / 1024,
-				size_32k_align_ahead, size_32k_align_ahead / 1024);
-		if ((status = flash_erase_blocks(flash, s_flash_erase_param[1].erase_mode, addr_32k_align_start,
-						s_flash_erase_param[1].block_size,
-						size_32k_align_ahead / s_flash_erase_param[1].block_size)) != HAL_OK) {
-			FLASH_ERR("earse fail\n");
-			ret = -1;
-			goto out;
-		}
-	}
-	if (size_32k_align_behind > 0) {
-		FLASH_DBG("erase the ahead 32k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
-				addr_64k_align_end, addr_64k_align_end / 1024,
-				size_32k_align_behind, size_32k_align_behind / 1024);
-		if ((status = flash_erase_blocks(flash, s_flash_erase_param[1].erase_mode, addr_64k_align_end,
-						s_flash_erase_param[1].block_size,
-						size_32k_align_behind / s_flash_erase_param[1].block_size)) != HAL_OK) {
-			FLASH_ERR("earse fail\n");
-			ret = -1;
-			goto out;
-		}
-	}
-	if (size_64k_align > 0) {
-		FLASH_DBG("erase the middle 64k area, addr:0x%x(%dK), size:0x%x(%dK)\n",
-				addr_64k_align_start, addr_64k_align_start / 1024,
-				size_64k_align, size_64k_align / 1024);
-		if ((status = flash_erase_blocks(flash, s_flash_erase_param[0].erase_mode, addr_64k_align_start,
-						s_flash_erase_param[0].block_size,
-						size_64k_align / s_flash_erase_param[0].block_size)) != HAL_OK) {
-			FLASH_ERR("earse fail\n");
-			ret = -1;
-			goto out;
-		}
+
+		cur += block_size;
 	}
 
 out:
