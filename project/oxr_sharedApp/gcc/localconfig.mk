@@ -38,11 +38,9 @@ __PRJ_CONFIG_WLAN_STA_AP := y
 __PRJ_CONFIG_XIP := y
 
 # set y to link function level's text/rodata/data to ".xip" section
-# Keep disabled for XR809 OTA safety: appos_xip_max places IRQ/flash-adjacent
-# chip driver objects into XIP, which can fault while flash erase disables XIP.
-# ifeq ($(__PRJ_CONFIG_XIP), y)
-# export __CONFIG_XIP_SECTION_FUNC_LEVEL := y
-# endif
+ifeq ($(__PRJ_CONFIG_XIP), y)
+export __CONFIG_XIP_SECTION_FUNC_LEVEL := y
+endif
 
 # enable OTA, default to n
 __PRJ_CONFIG_OTA := y
