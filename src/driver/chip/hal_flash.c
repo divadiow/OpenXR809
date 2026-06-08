@@ -39,6 +39,7 @@
 #include "driver/chip/hal_spi.h"
 #include "driver/chip/hal_flashctrl.h"
 #include "driver/chip/hal_flash.h"
+#include "driver/chip/hal_nvic.h"
 #include "driver/chip/hal_wdg.h" /* for HAL_Alive() */
 #include "hal_base.h"
 
@@ -1050,13 +1051,26 @@ HAL_Status HAL_Flash_Erase(uint32_t flash, FlashEraseMode blk_size, uint32_t add
 	while (blk_cnt-- > 0)
 	{
 		++block_index;
-		FD_INFO("erase trace block %u/%u before drv open, addr %#x",
+		FD_INFO("erase trace block %u/%u before mbox mask + drv open, addr %#x",
 		        block_index, orig_blk_cnt, eaddr);
+
+		/*
+		 * XR809: during an erase the flash/SBUS path is busy and XIP access is
+		 * unsafe.  Fault logs during OTA diagnostics repeatedly showed MBOX_N_IRQn
+		 * active while the erase-status wait was in progress, with PC ending up in
+		 * the invalid 0x40000000 region.  Keep other interrupts enabled, but hold
+		 * the network-core mailbox IRQ off for the whole flash-erase transaction and
+		 * re-enable it only after the flash driver has closed/restored normal access.
+		 */
+		HAL_NVIC_DisableIRQ(MBOX_N_IRQn);
+
 		ret = dev->drv->open(dev->drv);
 		FD_INFO("erase trace block %u/%u after drv open, ret %d",
 		        block_index, orig_blk_cnt, ret);
-		if (ret != HAL_OK)
+		if (ret != HAL_OK) {
+			HAL_NVIC_EnableIRQ(MBOX_N_IRQn);
 			break;
+		}
 
 		FD_INFO("erase trace block %u/%u before writeEnable", block_index, orig_blk_cnt);
 		dev->chip->writeEnable(dev->chip);
@@ -1082,6 +1096,8 @@ HAL_Status HAL_Flash_Erase(uint32_t flash, FlashEraseMode blk_size, uint32_t add
 		FD_INFO("erase trace block %u/%u before drv close", block_index, orig_blk_cnt);
 		dev->drv->close(dev->drv);
 		FD_INFO("erase trace block %u/%u after drv close", block_index, orig_blk_cnt);
+
+		HAL_NVIC_EnableIRQ(MBOX_N_IRQn);
 
 		if (ret < 0)
 			break;
