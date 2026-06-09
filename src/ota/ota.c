@@ -124,15 +124,7 @@ static ota_status_t ota_update_image_process(image_seq_t seq, void *url,
 	img_max_size = iop->img_max_size;
 
 	OTA_DBG("%s(), seq %d, flash %u, addr %#x\n", __func__, seq, flash, addr);
-	OTA_SYSLOG("OTA: erase flash...\n");
-
-	if (flash_erase_wrap(flash, addr, img_max_size) != 0) {
-		OTA_SYSLOG("OTA: erase flash has failed. OTA failed.\n");
-		OTA_SYSLOG("OTA: check adr %i and ofs %i.\n", addr, img_max_size);
-		return ret;
-	}
-
-	OTA_DBG("%s(), erase flash success\n", __func__);
+	OTA_SYSLOG("OTA: stream erase/write image...\n");
 
 	OTA_DBG("%s(), now will malloc memory %i\n", __func__, OTA_BUF_SIZE);
 
@@ -174,10 +166,7 @@ static ota_status_t ota_update_image_process(image_seq_t seq, void *url,
 
 	OTA_DBG("%s(), skip bootloader success\n", __func__);
 
-	if (HAL_Flash_Open(flash, OTA_FLASH_TIMEOUT) != HAL_OK) {
-		OTA_ERR("open flash %u fail\n", flash);
-		goto ota_err;
-	}
+	uint32_t erase_addr = addr;
 
 	OTA_DBG("image max size %u\n", img_max_size);
 #if OTA_IMG_DATA_CORRUPTION_TEST
@@ -199,6 +188,21 @@ static ota_status_t ota_update_image_process(image_seq_t seq, void *url,
 			OTA_WRN("recv_size %u, status %d, eof_flag %d\n",
 			        recv_size, status, eof_flag);
 		} else {
+			uint32_t write_end = addr + recv_size;
+
+			while (erase_addr < write_end) {
+				OTA_DBG("image loop erase sector, flash %u, addr %#x, write_end %#x\n",
+				        flash, erase_addr, write_end);
+				if (flash_erase_wrap(flash, erase_addr, 0x1000) != 0) {
+					OTA_ERR("stream erase flash fail, flash %u, addr %#x\n",
+					        flash, erase_addr);
+					break;
+				}
+				erase_addr += 0x1000;
+			}
+			if (erase_addr < write_end)
+				break;
+
 			img_max_size -= recv_size;
 			ota_priv.get_size += recv_size;
 
@@ -227,8 +231,6 @@ static ota_status_t ota_update_image_process(image_seq_t seq, void *url,
 #if OTA_IMG_DATA_CORRUPTION_TEST
 	OTA_SYSLOG("ota img data corruption test end\n");
 #endif
-
-	HAL_Flash_Close(flash);
 
 ota_err:
 	if (ota_buf)
