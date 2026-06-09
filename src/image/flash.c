@@ -91,9 +91,6 @@ static HAL_Status __nonxip_text flash_erase_blocks(uint32_t flash, FlashEraseMod
 		uint32_t erase_addr = addr + (i * block_size);
 
 		HAL_WDG_Feed();
-		FLASH_DBG("erase block, mode:%#x, addr:0x%x(%dK), block:%u/%u\n",
-		          erase_mode, erase_addr, erase_addr / 1024, i + 1, block_cnt);
-
 		status = HAL_Flash_Erase_BlockingPoll(flash, erase_mode, erase_addr, 1);
 
 		HAL_WDG_Feed();
@@ -277,8 +274,8 @@ int __nonxip_text flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 		return -1;
 	}
 
-	FLASH_DBG("start_addr:0x%x(%dK) end_addr:0x%x(%dK) earse_size:0x%x(%dK)\n",
-				addr, addr / 1024, end, end / 1024, size, size / 1024);
+	FLASH_DBG("erase range start:0x%x(%dK) end:0x%x(%dK) size:0x%x(%dK)\n",
+			  addr, addr / 1024, end, end / 1024, size, size / 1024);
 
 	while (cur < end) {
 		uint32_t remaining = end - cur;
@@ -291,9 +288,10 @@ int __nonxip_text flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 		 * flash is unavailable.  Use 4K sectors only for this wrapper path.
 		 * The ordinary flash_erase() path remains unchanged for LFS/config users.
 		 */
-		FLASH_DBG("erase area, mode:%#x, addr:0x%x(%dK), size:0x%x(%dK), remaining:0x%x(%dK)\n",
-		          erase_mode, cur, cur / 1024, block_size, block_size / 1024,
-		          remaining, remaining / 1024);
+		if (((cur - addr) & 0xFFFF) == 0) {
+			FLASH_DBG("erase progress addr:0x%x(%dK), remaining:0x%x(%dK)\n",
+			          cur, cur / 1024, remaining, remaining / 1024);
+		}
 
 		status = flash_erase_blocks(flash, erase_mode, cur, block_size, 1);
 		if (status != HAL_OK) {

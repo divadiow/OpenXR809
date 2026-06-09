@@ -37,6 +37,7 @@
 #include "driver/chip/hal_crypto.h"
 #include "driver/chip/hal_flash.h"
 #include "driver/chip/hal_wdg.h"
+#include "kernel/os/os_time.h"
 
 #define OTA_IMG_DATA_CORRUPTION_TEST	0 /* make image data corruption, for test only */
 
@@ -158,8 +159,8 @@ static ota_status_t ota_update_image_process(image_seq_t seq, void *url,
 		ota_priv.get_size += recv_size;
 
 		if (ota_priv.get_size >= debug_size) {
-			OTA_SYSLOG("OTA: loading image (%u KB)...\n",
-			           ota_priv.get_size / 1024);
+			OTA_SYSLOG("OTA: loading image (%u KB, flash addr %#x)...\n",
+			           ota_priv.get_size / 1024, addr);
 			debug_size += OTA_UPDATE_DEBUG_SIZE_UNIT;
 		}
 	}
@@ -175,11 +176,7 @@ static ota_status_t ota_update_image_process(image_seq_t seq, void *url,
 	while (img_max_size > 0) {
 		uint32_t req_size = (img_max_size > OTA_BUF_SIZE) ? OTA_BUF_SIZE : img_max_size;
 
-		OTA_DBG("image loop before get_cb, addr %#x, req %#x, remaining %#x, get_size %#x\n",
-		        addr, req_size, img_max_size, ota_priv.get_size);
 		status = get_cb(ota_buf, req_size, &recv_size, &eof_flag);
-		OTA_DBG("image loop after get_cb, status %d, recv %#x, eof %u, addr %#x\n",
-		        status, recv_size, eof_flag, addr);
 		if (status != OTA_STATUS_OK) {
 			OTA_ERR("status %d\n", status);
 			break;
@@ -191,8 +188,6 @@ static ota_status_t ota_update_image_process(image_seq_t seq, void *url,
 			uint32_t write_end = addr + recv_size;
 
 			while (erase_addr < write_end) {
-				OTA_DBG("image loop erase sector, flash %u, addr %#x, write_end %#x\n",
-				        flash, erase_addr, write_end);
 				if (flash_erase_wrap(flash, erase_addr, 0x1000) != 0) {
 					OTA_ERR("stream erase flash fail, flash %u, addr %#x\n",
 					        flash, erase_addr);
@@ -206,15 +201,13 @@ static ota_status_t ota_update_image_process(image_seq_t seq, void *url,
 			img_max_size -= recv_size;
 			ota_priv.get_size += recv_size;
 
-			OTA_DBG("image loop before write, flash %u, addr %#x, size %#x, first %02x %02x %02x %02x\n",
-			        flash, addr, recv_size, ota_buf[0], ota_buf[1], ota_buf[2], ota_buf[3]);
 			if (HAL_Flash_Write_BlockingPoll(flash, addr, ota_buf, recv_size) != HAL_OK) {
 				OTA_ERR("blocking write flash fail, flash %u, addr %#x, size %#x\n",
 				        flash, addr, recv_size);
 				break;
 			}
-			OTA_DBG("image loop after write, flash %u, addr %#x, size %#x\n",
-			        flash, addr, recv_size);
+			HAL_WDG_Feed();
+			OS_MSleep(1);
 			addr += recv_size;
 		}
 		if (eof_flag) {
@@ -223,8 +216,8 @@ static ota_status_t ota_update_image_process(image_seq_t seq, void *url,
 		}
 
 		if (ota_priv.get_size >= debug_size) {
-			OTA_SYSLOG("OTA: loading image (%u KB)...\n",
-			           ota_priv.get_size / 1024);
+			OTA_SYSLOG("OTA: loading image (%u KB, flash addr %#x)...\n",
+			           ota_priv.get_size / 1024, addr);
 			debug_size += OTA_UPDATE_DEBUG_SIZE_UNIT;
 		}
 	}

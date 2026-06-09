@@ -1059,11 +1059,9 @@ HAL_Status HAL_Flash_Write_BlockingPoll(uint32_t flash, uint32_t addr, const uin
 		left -= pp_size;
 	}
 
-	if (ret == HAL_OK) {
-		FD_INFO("blocking write addr %#x size %#x ret %d pages %u loops %u busy %d",
-		        addr, size, ret, pages, wait_loops_total, wait_busy);
-	} else {
-		FD_ERROR("blocking write failed");
+	if (ret != HAL_OK) {
+		FD_ERROR("blocking write failed, addr %#x size %#x pages %u loops %u busy %d",
+		         addr, size, pages, wait_loops_total, wait_busy);
 	}
 
 	return ret;
@@ -1203,9 +1201,6 @@ HAL_Status HAL_Flash_Erase_BlockingPoll(uint32_t flash, FlashEraseMode blk_size,
 		arch_irq_restore(irq_flags);
 
 		dev->drv->close(dev->drv);
-
-		FD_INFO("blocking erase addr %#x ret %d loops %u busy %d",
-		        eaddr, ret, wait_loops, wait_busy);
 
 		if (ret < 0) {
 			FD_ERROR("blocking erase failed: %d", ret);
