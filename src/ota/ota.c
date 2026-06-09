@@ -204,8 +204,8 @@ static ota_status_t ota_update_image_process(image_seq_t seq, void *url,
 
 			OTA_DBG("image loop before write, flash %u, addr %#x, size %#x, first %02x %02x %02x %02x\n",
 			        flash, addr, recv_size, ota_buf[0], ota_buf[1], ota_buf[2], ota_buf[3]);
-			if (HAL_Flash_Write(flash, addr, ota_buf, recv_size) != HAL_OK) {
-				OTA_ERR("write flash fail, flash %u, addr %#x, size %#x\n",
+			if (HAL_Flash_Write_BlockingPoll(flash, addr, ota_buf, recv_size) != HAL_OK) {
+				OTA_ERR("blocking write flash fail, flash %u, addr %#x, size %#x\n",
 				        flash, addr, recv_size);
 				break;
 			}

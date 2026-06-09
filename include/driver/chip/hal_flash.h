@@ -139,6 +139,8 @@ HAL_Status HAL_Flash_Overwrite(uint32_t flash, uint32_t addr, uint8_t *data, uin
 
 HAL_Status HAL_Flash_Write(uint32_t flash, uint32_t addr, const uint8_t *data, uint32_t size);
 
+HAL_Status HAL_Flash_Write_BlockingPoll(uint32_t flash, uint32_t addr, const uint8_t *data, uint32_t size);
+
 HAL_Status HAL_Flash_Read(uint32_t flash, uint32_t addr, uint8_t *data, uint32_t size);
 
 HAL_Status HAL_Flash_Erase(uint32_t flash, FlashEraseMode blk_size, uint32_t addr, uint32_t blk_cnt);

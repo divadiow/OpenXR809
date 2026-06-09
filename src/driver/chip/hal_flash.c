@@ -1006,6 +1006,78 @@ HAL_Status HAL_Flash_Write(uint32_t flash, uint32_t addr, const uint8_t *data, u
   * @param size: the data size needed to read.
   * @retval HAL_Status: The status of driver
   */
+HAL_Status HAL_Flash_Write_BlockingPoll(uint32_t flash, uint32_t addr, const uint8_t *data, uint32_t size)
+{
+	FlashDev *dev = getFlashDev(flash);
+	HAL_Status ret = HAL_ERROR;
+	uint32_t address = addr;
+	uint32_t left = size;
+	const uint8_t *ptr = data;
+	uint32_t pp_size;
+	uint32_t pages = 0;
+	uint32_t wait_loops_total = 0;
+	int wait_busy = -1;
+
+	FD_DEBUG("%d: blocking w%d, a: 0x%x", flash, size, addr);
+
+	if (dev == NULL)
+		return HAL_INVALID;
+	if (dev->chip->pageProgram == NULL)
+		return HAL_INVALID;
+
+	while (left > 0) {
+		unsigned long irq_flags;
+		uint32_t wait_loops = 0;
+
+		pp_size = MIN(left, dev->chip->mPageSize - (address % dev->chip->mPageSize));
+
+		ret = dev->drv->open(dev->drv);
+		if (ret != HAL_OK)
+			break;
+
+		irq_flags = arch_irq_save();
+		dev->chip->writeEnable(dev->chip);
+		ret = dev->chip->pageProgram(dev->chip, dev->wmode, address, ptr, pp_size);
+		if (ret >= 0)
+			ret = HAL_Flash_WaitComplBlockingPoll(dev, 5000, &wait_loops, &wait_busy);
+		dev->chip->writeDisable(dev->chip);
+		arch_irq_restore(irq_flags);
+
+		dev->drv->close(dev->drv);
+
+		wait_loops_total += wait_loops;
+		++pages;
+
+		if (ret < 0) {
+			FD_ERROR("blocking write failed, addr %#x, size %#x, ret %d, loops %u, busy %d",
+			         address, pp_size, ret, wait_loops, wait_busy);
+			break;
+		}
+
+		address += pp_size;
+		ptr += pp_size;
+		left -= pp_size;
+	}
+
+	if (ret == HAL_OK) {
+		FD_INFO("blocking write addr %#x size %#x ret %d pages %u loops %u busy %d",
+		        addr, size, ret, pages, wait_loops_total, wait_busy);
+	} else {
+		FD_ERROR("blocking write failed");
+	}
+
+	return ret;
+}
+
+/**
+  * @brief Read flash device memory.
+  * @param flash: the flash device number, same as the g_flash_cfg vector
+  *               sequency number.
+  * @param addr: the address of memory.
+  * @param data: the data needed to write to flash device.
+  * @param size: the size of data needed to read.
+  * @retval HAL_Status: The status of driver
+  */
 HAL_Status HAL_Flash_Read(uint32_t flash, uint32_t addr, uint8_t *data, uint32_t size)
 {
 	FlashDev *dev = getFlashDev(flash);
