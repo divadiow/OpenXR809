@@ -30,6 +30,7 @@
 #include "driver/chip/hal_flash.h"
 #include "driver/chip/hal_wdg.h"
 #include "kernel/os/os_mutex.h"
+#include "kernel/os/os_time.h"
 #include "compiler.h"
 #include "image/flash.h"
 
@@ -101,6 +102,13 @@ static HAL_Status __nonxip_text flash_erase_blocks(uint32_t flash, FlashEraseMod
 			          erase_mode, erase_addr, erase_addr / 1024, i + 1, block_cnt);
 			return status;
 		}
+
+		/*
+		 * The erase itself runs with XIP/IRQs constrained in the HAL wrapper.
+		 * Once that sector has completed and flash is usable again, yield briefly
+		 * so the WLAN/MBOX and TCP/IP tasks can drain work during a long OTA erase.
+		 */
+		OS_MSleep(1);
 	}
 
 	return status;
@@ -284,8 +292,8 @@ int __nonxip_text flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 		 * The ordinary flash_erase() path remains unchanged for LFS/config users.
 		 */
 		FLASH_DBG("erase area, mode:%#x, addr:0x%x(%dK), size:0x%x(%dK), remaining:0x%x(%dK)\n",
-				  erase_mode, cur, cur / 1024, block_size, block_size / 1024,
-				  remaining, remaining / 1024);
+		          erase_mode, cur, cur / 1024, block_size, block_size / 1024,
+		          remaining, remaining / 1024);
 
 		status = flash_erase_blocks(flash, erase_mode, cur, block_size, 1);
 		if (status != HAL_OK) {
