@@ -40,6 +40,7 @@
 #include "driver/chip/hal_flashctrl.h"
 #include "driver/chip/hal_flash.h"
 #include "driver/chip/hal_wdg.h" /* for HAL_Alive() */
+#include "sys/interrupt.h"
 #include "hal_base.h"
 
 #include "pm/pm.h"
@@ -783,6 +784,37 @@ static HAL_Status HAL_Flash_WaitCompl(FlashDev *dev, int32_t timeout_ms)
 #undef FLASH_WAIT_TIME
 }
 
+static HAL_Status HAL_Flash_WaitComplBlockingPoll(FlashDev *dev, int32_t timeout_ms,
+                                                   uint32_t *loop_out, int *busy_out)
+{
+#define FLASH_BLOCKING_WAIT_US (1000)
+	uint32_t loops = 0;
+	uint32_t max_loops = (timeout_ms > 0) ? (uint32_t)timeout_ms : 1;
+	int busy = 1;
+
+	while (loops < max_loops) {
+		busy = dev->chip->isBusy(dev->chip);
+		if (busy <= 0)
+			break;
+
+		HAL_XIP_Delay(FLASH_BLOCKING_WAIT_US);
+		++loops;
+	}
+
+	if (loop_out)
+		*loop_out = loops;
+	if (busy_out)
+		*busy_out = busy;
+
+	if (busy > 0) {
+		FD_ERROR("blocking wait clr busy timeout, loops %u, busy %d", loops, busy);
+		return HAL_TIMEOUT;
+	}
+
+	return HAL_OK;
+#undef FLASH_BLOCKING_WAIT_US
+}
+
 /**
   * @brief Flash ioctl function.
   * @note attr : arg
@@ -1041,6 +1073,59 @@ HAL_Status HAL_Flash_Erase(uint32_t flash, FlashEraseMode blk_size, uint32_t add
 
 		if (ret < 0)
 			break;
+		eaddr += esize;
+	}
+
+	return ret;
+}
+
+HAL_Status HAL_Flash_Erase_BlockingPoll(uint32_t flash, FlashEraseMode blk_size,
+                                         uint32_t addr, uint32_t blk_cnt)
+{
+	FlashDev *dev = getFlashDev(flash);
+	HAL_Status ret = HAL_ERROR;
+	uint32_t esize = blk_size;
+	uint32_t eaddr = addr;
+
+	FD_DEBUG("%d: blocking e%d * %d, a: 0x%x", flash, (uint32_t)blk_size, blk_cnt, addr);
+
+	if ((addr + blk_size * blk_cnt) > dev->chip->mSize) {
+		FD_ERROR("blocking erase memory is over flash memory\n");
+		return HAL_INVALID;
+	}
+	if ((blk_size == FLASH_ERASE_CHIP) && (blk_cnt != 1))
+		FD_DEBUG("chip erase will be execute more than 1");
+	if (addr % blk_size) {
+		FD_ERROR("blocking erase on a incompatible address");
+		return HAL_INVALID;
+	}
+
+	while (blk_cnt-- > 0) {
+		unsigned long irq_flags;
+		uint32_t wait_loops = 0;
+		int wait_busy = -1;
+
+		ret = dev->drv->open(dev->drv);
+		if (ret != HAL_OK)
+			break;
+
+		irq_flags = arch_irq_save();
+		dev->chip->writeEnable(dev->chip);
+		ret = dev->chip->erase(dev->chip, blk_size, eaddr);
+		if (ret >= 0)
+			ret = HAL_Flash_WaitComplBlockingPoll(dev, 5000, &wait_loops, &wait_busy);
+		dev->chip->writeDisable(dev->chip);
+		arch_irq_restore(irq_flags);
+
+		dev->drv->close(dev->drv);
+
+		FD_INFO("blocking erase addr %#x ret %d loops %u busy %d",
+		        eaddr, ret, wait_loops, wait_busy);
+
+		if (ret < 0) {
+			FD_ERROR("blocking erase failed: %d", ret);
+			break;
+		}
 		eaddr += esize;
 	}
 

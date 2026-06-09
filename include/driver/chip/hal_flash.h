@@ -143,6 +143,8 @@ HAL_Status HAL_Flash_Read(uint32_t flash, uint32_t addr, uint8_t *data, uint32_t
 
 HAL_Status HAL_Flash_Erase(uint32_t flash, FlashEraseMode blk_size, uint32_t addr, uint32_t blk_cnt);
 
+HAL_Status HAL_Flash_Erase_BlockingPoll(uint32_t flash, FlashEraseMode blk_size, uint32_t addr, uint32_t blk_cnt);
+
 HAL_Status HAL_Flash_MemoryOf(uint32_t flash, FlashEraseMode size, uint32_t addr, uint32_t *start);
 
 int HAL_Flash_Check(uint32_t flash, uint32_t addr, uint8_t *data, uint32_t size);

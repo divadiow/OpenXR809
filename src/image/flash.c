@@ -93,7 +93,7 @@ static HAL_Status __nonxip_text flash_erase_blocks(uint32_t flash, FlashEraseMod
 		FLASH_DBG("erase block, mode:%#x, addr:0x%x(%dK), block:%u/%u\n",
 		          erase_mode, erase_addr, erase_addr / 1024, i + 1, block_cnt);
 
-		status = HAL_Flash_Erase(flash, erase_mode, erase_addr, 1);
+		status = HAL_Flash_Erase_BlockingPoll(flash, erase_mode, erase_addr, 1);
 
 		HAL_WDG_Feed();
 		if (status != HAL_OK) {
