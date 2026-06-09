@@ -276,20 +276,13 @@ int __nonxip_text flash_erase_wrap(uint32_t flash, uint32_t addr, uint32_t size)
 		uint32_t remaining = end - cur;
 		uint32_t block_size = s_flash_erase_param[2].block_size;
 		FlashEraseMode erase_mode = s_flash_erase_param[2].erase_mode;
-		uint32_t start;
 
-		if ((remaining >= (uint32_t)s_flash_erase_param[0].block_size) &&
-			(HAL_Flash_MemoryOf(flash, s_flash_erase_param[0].erase_mode, cur, &start) == HAL_OK) &&
-			(cur == start)) {
-			block_size = s_flash_erase_param[0].block_size;
-			erase_mode = s_flash_erase_param[0].erase_mode;
-		} else if ((remaining >= (uint32_t)s_flash_erase_param[1].block_size) &&
-			(HAL_Flash_MemoryOf(flash, s_flash_erase_param[1].erase_mode, cur, &start) == HAL_OK) &&
-			(cur == start)) {
-			block_size = s_flash_erase_param[1].block_size;
-			erase_mode = s_flash_erase_param[1].erase_mode;
-		}
-
+		/*
+		 * XR809 OTA/runtime erase must keep each XIP-suspended critical section
+		 * short.  64K/32K erases can let the WLAN/MBOX side fault while the
+		 * flash is unavailable.  Use 4K sectors only for this wrapper path.
+		 * The ordinary flash_erase() path remains unchanged for LFS/config users.
+		 */
 		FLASH_DBG("erase area, mode:%#x, addr:0x%x(%dK), size:0x%x(%dK), remaining:0x%x(%dK)\n",
 				  erase_mode, cur, cur / 1024, block_size, block_size / 1024,
 				  remaining, remaining / 1024);
