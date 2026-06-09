@@ -42,6 +42,7 @@
 #include "driver/chip/hal_wdg.h" /* for HAL_Alive() */
 #include "sys/interrupt.h"
 #include "hal_base.h"
+#include "compiler.h"
 
 #include "pm/pm.h"
 #include "sys/xr_debug.h"
@@ -784,12 +785,25 @@ static HAL_Status HAL_Flash_WaitCompl(FlashDev *dev, int32_t timeout_ms)
 #undef FLASH_WAIT_TIME
 }
 
-static HAL_Status HAL_Flash_WaitComplBlockingPoll(FlashDev *dev, int32_t timeout_ms,
-                                                   uint32_t *loop_out, int *busy_out)
+static __nonxip_text void HAL_Flash_RamDelayLoop(uint32_t loops)
 {
-#define FLASH_BLOCKING_WAIT_US (1000)
+	volatile uint32_t i;
+
+	for (i = 0; i < loops; ++i)
+		__asm volatile ("nop");
+}
+
+static __nonxip_text HAL_Status HAL_Flash_WaitComplBlockingPoll(FlashDev *dev, int32_t timeout_ms,
+                                                                  uint32_t *loop_out, int *busy_out)
+{
+	/*
+	 * Do not call HAL_XIP_Delay() here.  On XR809 that can call HAL_UDelay(),
+	 * which uses hal_rtc.o.  hal_rtc.o is linked into XIP in xr809_appos.ld,
+	 * so calling it while flash/XIP is suspended can fault at 0x40000000.
+	 * Keep this wait loop self-contained in RAM-only code.
+	 */
 	uint32_t loops = 0;
-	uint32_t max_loops = (timeout_ms > 0) ? (uint32_t)timeout_ms : 1;
+	uint32_t max_loops = (timeout_ms > 0) ? ((uint32_t)timeout_ms * 64U) : 64U;
 	int busy = 1;
 
 	while (loops < max_loops) {
@@ -797,7 +811,7 @@ static HAL_Status HAL_Flash_WaitComplBlockingPoll(FlashDev *dev, int32_t timeout
 		if (busy <= 0)
 			break;
 
-		HAL_XIP_Delay(FLASH_BLOCKING_WAIT_US);
+		HAL_Flash_RamDelayLoop(512U);
 		++loops;
 	}
 
@@ -812,7 +826,6 @@ static HAL_Status HAL_Flash_WaitComplBlockingPoll(FlashDev *dev, int32_t timeout
 	}
 
 	return HAL_OK;
-#undef FLASH_BLOCKING_WAIT_US
 }
 
 /**
